@@ -2,28 +2,30 @@ package org.superbiz.moviefun;
 
 import com.fasterxml.jackson.databind.MappingIterator;
 import com.fasterxml.jackson.databind.ObjectReader;
+import org.superbiz.moviefun.movies.MoviesBean;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
+import java.util.logging.Logger;
 
 public class CsvUtils {
 
     public static String readFile(String path) {
-        try {
-            Scanner scanner = new Scanner(new File(path)).useDelimiter("\\A");
-
-            if (scanner.hasNext()) {
-                return scanner.next();
-            } else {
-                return "";
-            }
-
-        } catch (FileNotFoundException e) {
-            throw new RuntimeException(e);
+        ClassLoader classLoader = CsvUtils.class.getClassLoader();
+        InputStream stream = classLoader.getResourceAsStream(path);
+        if (stream == null) {
+            return "";
+        }
+        Scanner scanner = new Scanner(stream).useDelimiter("\\A");
+        if (scanner.hasNext()) {
+            return scanner.next();
+        } else {
+            return "";
         }
     }
 
