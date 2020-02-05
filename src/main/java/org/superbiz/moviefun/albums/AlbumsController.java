@@ -1,35 +1,45 @@
 package org.superbiz.moviefun.albums;
 
 import org.apache.tika.Tika;
+import org.apache.tika.io.IOUtils;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.superbiz.moviefun.Application;
+import org.superbiz.moviefun.blobstore.Blob;
+import org.superbiz.moviefun.blobstore.BlobStore;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
+import java.util.Optional;
+import java.util.logging.Logger;
 
 import static java.lang.ClassLoader.getSystemResource;
 import static java.lang.String.format;
-import static java.nio.file.Files.readAllBytes;
 
 @Controller
 @RequestMapping("/albums")
 public class AlbumsController {
 
-    private final AlbumsBean albumsBean;
+    Logger logger = Logger.getLogger(AlbumsController.class.getName());
 
-    public AlbumsController(AlbumsBean albumsBean) {
+    private final AlbumsBean albumsBean;
+    private final BlobStore blobStore;
+
+    public AlbumsController(AlbumsBean albumsBean, BlobStore blobStore) {
         this.albumsBean = albumsBean;
+        this.blobStore = blobStore;
     }
 
+    private Blob getDefaultCover() {
+        return new Blob("default", Application.class.getClassLoader().getResourceAsStream("default-cover.jpg"), MediaType.IMAGE_JPEG_VALUE);
+    }
 
     @GetMapping
     public String index(Map<String, Object> model) {
@@ -45,20 +55,33 @@ public class AlbumsController {
 
     @PostMapping("/{albumId}/cover")
     public String uploadCover(@PathVariable long albumId, @RequestParam("file") MultipartFile uploadedFile) throws IOException {
-        saveUploadToFile(uploadedFile, getCoverFile(albumId));
+        if (uploadedFile.getSize() > 0) {
+            blobStore.put(new Blob(String.valueOf(albumId), uploadedFile.getInputStream(), uploadedFile.getContentType()));
+        }
 
         return format("redirect:/albums/%d", albumId);
     }
 
     @GetMapping("/{albumId}/cover")
     public HttpEntity<byte[]> getCover(@PathVariable long albumId) throws IOException, URISyntaxException {
-        Path coverFilePath = getExistingCoverPath(albumId);
-        byte[] imageBytes = readAllBytes(coverFilePath);
-        HttpHeaders headers = createImageHttpHeaders(coverFilePath, imageBytes);
-
+        Blob blob = null;
+        try {
+            Optional<Blob> op = blobStore.get(String.valueOf(albumId));
+            blob = op.orElse(getDefaultCover());
+        } catch (Exception e) {
+            logger.warning(e.getMessage());
+            blob = getDefaultCover();
+        }
+        byte[] imageBytes = IOUtils.toByteArray(blob.inputStream);
+        HttpHeaders headers = createImageHttpHeaders(blob.contentType, imageBytes);
         return new HttpEntity<>(imageBytes, headers);
     }
 
+    @GetMapping("/deleteAll")
+    public String deleteAll() {
+        blobStore.deleteAll();
+        return "redirect:/albums";
+    }
 
     private void saveUploadToFile(@RequestParam("file") MultipartFile uploadedFile, File targetFile) throws IOException {
         targetFile.delete();
@@ -68,6 +91,13 @@ public class AlbumsController {
         try (FileOutputStream outputStream = new FileOutputStream(targetFile)) {
             outputStream.write(uploadedFile.getBytes());
         }
+    }
+
+    private HttpHeaders createImageHttpHeaders(String contentType, byte[] imageBytes) throws IOException {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(contentType));
+        headers.setContentLength(imageBytes.length);
+        return headers;
     }
 
     private HttpHeaders createImageHttpHeaders(Path coverFilePath, byte[] imageBytes) throws IOException {
@@ -81,6 +111,8 @@ public class AlbumsController {
 
     private File getCoverFile(@PathVariable long albumId) {
         String coverFileName = format("covers/%d", albumId);
+        File file = new File(coverFileName);
+        logger.info("**** file.getAbsolutePath(): " + file.getAbsolutePath());
         return new File(coverFileName);
     }
 
